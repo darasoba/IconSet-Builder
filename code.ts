@@ -113,7 +113,7 @@ async function handleGenerate(msg: GenerateMessage): Promise<void> {
     componentSet.dashPattern = [8, 4]; // Dotted/dashed pattern
     componentSet.cornerRadius = 8;
     componentSet.layoutMode = "HORIZONTAL";
-    componentSet.itemSpacing = 40;
+    componentSet.itemSpacing = 32;
     componentSet.counterAxisAlignItems = "CENTER";
     componentSet.primaryAxisSizingMode = "AUTO";
     componentSet.counterAxisSizingMode = "AUTO";
