@@ -7,7 +7,6 @@ type GenerateMessage = {
   type: "generate";
   variants: VariantConfig[];
   customStroke: boolean;
-  style: string;
 };
 
 type CancelMessage = {
@@ -20,7 +19,7 @@ type SupportedSelection = FrameNode | ComponentNode | InstanceNode | GroupNode;
 type RescalableNode = SceneNode & { rescale: (scaleFactor: number) => void };
 
 const UI_WIDTH = 340;
-const UI_HEIGHT = 560;
+const UI_HEIGHT = 460;
 
 const DRAWABLE_TYPES = new Set<NodeType>([
   "VECTOR",
@@ -35,11 +34,6 @@ const DRAWABLE_TYPES = new Set<NodeType>([
 figma.showUI(__html__, { width: UI_WIDTH, height: UI_HEIGHT });
 
 figma.ui.onmessage = async (msg: UiMessage) => {
-  if (msg.type === "cancel") {
-    figma.closePlugin();
-    return;
-  }
-
   if (msg.type === "generate") {
     await handleGenerate(msg);
   }
@@ -49,24 +43,11 @@ async function handleGenerate(msg: GenerateMessage): Promise<void> {
   const selection = figma.currentPage.selection;
 
   if (selection.length === 0) {
-    return notifyError("Select a square icon frame to generate variants.");
+    return notifyError("Select at least one square icon frame to generate variants.");
   }
 
-  if (selection.length > 1) {
-    return notifyError("Select only one icon.");
-  }
-
-  const selected = selection[0];
-  if (!isSupportedSelection(selected)) {
-    return notifyError("Select a frame, component, instance, or group.");
-  }
-
-  if (!isSquare(selected)) {
-    return notifyError("Selection is not square. Fix it or pad to square.");
-  }
-
-  if (!hasDrawableDescendant(selected)) {
-    return notifyError("Selection has no drawable vector layers.");
+  if (selection.length > 100) {
+    return notifyError("Select a maximum of 100 icons.");
   }
 
   const variants = sanitizeVariants(msg.variants, msg.customStroke);
@@ -74,56 +55,98 @@ async function handleGenerate(msg: GenerateMessage): Promise<void> {
     return notifyError("Add at least one valid variant size.");
   }
 
-  const baseSize = selected.width;
-  const baseName = selected.name.replace(/\s*\/\s*/g, "-");
-
-  // Create individual components for each variant
-  const components: ComponentNode[] = [];
-
-  for (const variant of variants) {
-    const component = createVariantComponent(
-      selected,
-      variant,
-      baseSize,
-      baseName,
-      msg.customStroke
-    );
-    components.push(component);
+  // Filter and validate all selected icons
+  const validIcons: SupportedSelection[] = [];
+  for (const node of selection) {
+    if (!isSupportedSelection(node)) {
+      continue;
+    }
+    if (!isSquare(node)) {
+      continue;
+    }
+    if (!hasDrawableDescendant(node)) {
+      continue;
+    }
+    validIcons.push(node);
   }
 
-  // Combine components into a component set
-  const componentSet = figma.combineAsVariants(components, figma.currentPage);
-  componentSet.name = baseName;
+  if (validIcons.length === 0) {
+    return notifyError("No valid icons found. Select square frames, components, instances, or groups with vector layers.");
+  }
 
-  // Style the component set container with dotted purple border
-  componentSet.fills = [];
-  componentSet.strokes = [
-    {
-      type: "SOLID",
-      color: { r: 0.6, g: 0.4, b: 0.9 }, // Purple color
-    },
-  ];
-  componentSet.strokeWeight = 1;
-  componentSet.dashPattern = [8, 4]; // Dotted/dashed pattern
-  componentSet.cornerRadius = 8;
-  componentSet.layoutMode = "HORIZONTAL";
-  componentSet.itemSpacing = 40;
-  componentSet.counterAxisAlignItems = "CENTER";
-  componentSet.primaryAxisSizingMode = "AUTO";
-  componentSet.counterAxisSizingMode = "AUTO";
-  componentSet.paddingLeft = 20;
-  componentSet.paddingRight = 20;
-  componentSet.paddingTop = 20;
-  componentSet.paddingBottom = 20;
+  const componentSets: ComponentSetNode[] = [];
+  let currentY = 0;
+  let maxWidth = 0;
 
-  // Position next to original
-  componentSet.x = selected.x + selected.width + 48;
-  componentSet.y = selected.y;
+  // Process each valid icon
+  for (const selected of validIcons) {
+    const baseSize = selected.width;
+    const baseName = selected.name.replace(/\s*\/\s*/g, "-");
 
-  figma.currentPage.selection = [componentSet];
-  figma.viewport.scrollAndZoomIntoView([componentSet]);
+    // Create individual components for each variant
+    const components: ComponentNode[] = [];
 
-  figma.notify(`Created component set with ${variants.length} size variants.`);
+    for (const variant of variants) {
+      const component = createVariantComponent(
+        selected,
+        variant,
+        baseSize,
+        baseName,
+        msg.customStroke
+      );
+      components.push(component);
+    }
+
+    // Combine components into a component set
+    const componentSet = figma.combineAsVariants(components, figma.currentPage);
+    componentSet.name = baseName;
+
+    // Style the component set container with dotted purple border
+    componentSet.fills = [];
+    componentSet.strokes = [
+      {
+        type: "SOLID",
+        color: { r: 0.6, g: 0.4, b: 0.9 }, // Purple color
+      },
+    ];
+    componentSet.strokeWeight = 1;
+    componentSet.dashPattern = [8, 4]; // Dotted/dashed pattern
+    componentSet.cornerRadius = 8;
+    componentSet.layoutMode = "HORIZONTAL";
+    componentSet.itemSpacing = 40;
+    componentSet.counterAxisAlignItems = "CENTER";
+    componentSet.primaryAxisSizingMode = "AUTO";
+    componentSet.counterAxisSizingMode = "AUTO";
+    componentSet.paddingLeft = 20;
+    componentSet.paddingRight = 20;
+    componentSet.paddingTop = 20;
+    componentSet.paddingBottom = 20;
+
+    // Position component sets in a grid layout
+    if (componentSets.length === 0) {
+      // First one: position next to the first selected icon
+      componentSet.x = selected.x + selected.width + 48;
+      componentSet.y = selected.y;
+      currentY = selected.y;
+      maxWidth = selected.width + 48;
+    } else {
+      // Subsequent ones: stack vertically
+      const previousSet = componentSets[componentSets.length - 1];
+      componentSet.x = previousSet.x;
+      componentSet.y = previousSet.y + previousSet.height + 40;
+      currentY = componentSet.y;
+    }
+
+    componentSets.push(componentSet);
+  }
+
+  // Select all created component sets
+  figma.currentPage.selection = componentSets;
+  figma.viewport.scrollAndZoomIntoView(componentSets);
+
+  const iconCount = validIcons.length;
+  const variantCount = variants.length;
+  figma.notify(`Created ${iconCount} component set${iconCount > 1 ? "s" : ""} with ${variantCount} size variant${variantCount > 1 ? "s" : ""} each.`);
 }
 
 function createVariantComponent(
