@@ -190,7 +190,10 @@ function createVariantComponent(
   workingNode.x = Math.round((variant.sizePx - workingNode.width) / 2);
   workingNode.y = Math.round((variant.sizePx - workingNode.height) / 2);
 
-  // Flatten the content to simplify (outlines strokes, renames to "vector")
+  // Outline all strokes (convert strokes to filled paths)
+  outlineAllStrokes(workingNode);
+
+  // Flatten the content to simplify and rename to "vector"
   flattenContent(component);
 
   // Step 4: Lock aspect ratio on component and all children
@@ -303,6 +306,35 @@ function sanitizeVariants(
 
 function canRescale(node: SceneNode): node is RescalableNode {
   return "rescale" in node;
+}
+
+function outlineAllStrokes(node: SceneNode): void {
+  // Process children first (bottom-up) so inner strokes are outlined before outer ones
+  if ("children" in node) {
+    for (const child of [...(node as any).children] as SceneNode[]) {
+      outlineAllStrokes(child);
+    }
+  }
+
+  if (!("outlineStroke" in node) || !("strokes" in node)) return;
+
+  const strokes = (node as any).strokes as readonly Paint[];
+  if (!strokes || strokes.length === 0) return;
+
+  try {
+    const outlined = (node as any).outlineStroke() as VectorNode | null;
+    if (outlined && node.parent) {
+      const parent = node.parent as any;
+      const siblings = parent.children as readonly SceneNode[];
+      const index = Array.prototype.indexOf.call(siblings, node);
+      if (index >= 0) {
+        parent.insertChild(index + 1, outlined);
+      }
+      (node as any).strokes = [];
+    }
+  } catch {
+    // Ignore nodes that don't support outlining
+  }
 }
 
 function applyStrokeWeight(root: SceneNode, weight: number): void {
